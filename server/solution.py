@@ -309,3 +309,71 @@ class MemberOnlyArticle(Resource):
         return article.to_dict(), 200
 
 api.add_resource(MemberOnlyArticle, '/members_only_articles/<int:id>', endpoint='member_article')
+
+
+# password protection 
+class User(db.Model, SerializerMixin):
+    __tablename__ = 'users'
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String)
+    _password_hash = db.Column(db.String)
+
+    @hybrid_property
+    def password_hash(self):
+        raise Exception('Password hashes may not be viewed.')
+
+    @password_hash.setter
+    def password_hash(self, password):
+        password_hash = bcrypt.generate_password_hash(
+            password.encode('utf-8'))
+        self._password_hash = password_hash.decode('utf-8')
+
+    def authenticate(self, password):
+        return bcrypt.check_password_hash(
+            self._password_hash, password.encode('utf-8'))
+
+    def __repr__(self):
+        return f'User {self.username}, ID: {self.id}'
+
+class Signup(Resource):
+    
+    def post(self):
+        json = request.get_json()
+        user = User(
+            username=json['username']
+        )
+        user.password_hash = json['password']
+        db.session.add(user)
+        db.session.commit()
+        return user.to_dict(), 201
+
+class CheckSession(Resource):
+    def get(self):
+        if session.get('user_id'):
+            user = User.query.filter(User.id == session['user_id']).first()
+            return user.to_dict(), 200
+        return {}, 204
+
+class Login(Resource):
+    def post(self):
+        username = request.get_json()['username']
+        password = request.get_json()['password']
+
+        user = User.query.filter(User.username == username).first()
+
+        if user.authenticate(password):
+            session['user_id'] = user.id 
+            return user.to_dict(),200
+        return {'error': 'Unauthorized log in'}, 401
+
+class Logout(Resource):
+    def delete(self):
+        session['user_id'] = None
+        return {}, 204
+
+api.add_resource(ClearSession, '/clear', endpoint='clear')
+api.add_resource(Signup, '/signup', endpoint='signup')
+api.add_resource(Login, '/login', endpoint='login')
+api.add_resource(Logout, '/logout', endpoint='logout')
+api.add_resource(CheckSession, '/check_session', endpoint='check_session')
